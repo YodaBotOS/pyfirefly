@@ -30,7 +30,7 @@ async def demo(prompt, num):
  
 	result = await asyncio.gather(*tasks)
   
-	for i in range(num):
+	async for i in range(num):
 		async with aiofiles.open(f'{i}.jpeg', mode='wb+') as f:
 			await f.write(result[i]['filedata'])
 
