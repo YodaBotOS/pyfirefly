@@ -4,6 +4,44 @@ import json
 import random
 import time
 import uuid
+from typing import (
+    Awaitable,
+    Optional
+)
+
+from .exceptions import (
+	ImageGenerationDenied,
+	Unauthorized,
+	SessionExpired
+)
+
+class _Latin1BodyPartReader(aiohttp.multipart.BodyPartReader):
+    async def text(self) -> Awaitable[str]:
+        data = await self.read(decode=True)
+        return data.decode('latin1')
+
+class _Latin1MultipartReader(aiohttp.multipart.MultipartReader):
+    async def next(self) -> Optional[_Latin1BodyPartReader]:
+        part_reader = await super().next()
+        if part_reader is not None:
+            part_reader.__class__ = _Latin1BodyPartReader
+        return part_reader
+
+class Result:
+	'''
+	Represents a result from the Adobe Firefly API.
+
+	:param image: The image data.
+	:param ext: The image extention.
+	:param metadata: The metadata.
+	:param img_options: The image options that were used to generate the image.
+	'''
+	__slots__ = ['image', 'ext', 'metadata', 'img_options']
+	def __init__(self, image: bytes, metadata: dict, ext: str, img_options: dict):
+		self.image = image
+		self.ext = ext
+		self.metadata = metadata
+		self.img_options = img_options
 
 class Firefly:
 	'''
@@ -14,28 +52,7 @@ class Firefly:
 	:param anonymous: Whether to use anonymous mode. Not supported yet.
 	:param fetch_image_assets: Whether to fetch image assets.
 	:param fetch_text_assets: Whether to fetch text assets.
-
-	Example usage:
-	```py
-	import aiofiles
-	import aiohttp
-	import asyncio
-	import pyfirefly
-
-	async def demo(prompt, num = 4):
-		a = await pyfirefly.Firefly(token)
-
-		tasks = []
-		for i in range(num):
-			tasks.append(a.text_to_image(prompt))
-		result = await asyncio.gather(*tasks)
-
-		for i in range(num):
-			async with aiofiles.open(f'{i}.jpeg', mode='wb+') as f:
-				await f.write(result[i]['filedata'])
-	
-	asyncio.run(demo('flying pigs'))
-	'''
+    '''
 	__slots__ = ['headers', 'base', 'engine', 'session', 'image_styles', 'text_presets', 'text_fonts']
 
 	URLS = {
@@ -67,12 +84,12 @@ class Firefly:
 
 	async def __init__(self, auth: str, build: str='prod', anonymous: bool=False, fetch_image_assets: bool=True, fetch_text_assets: bool=True):
 		if anonymous:
-			raise Exception('Anonymous mode not supported yet.')
+			raise NotImplementedError('Anonymous mode not supported yet.')
 		
 		self.headers = {
 			'Origin': 'https://firefly.adobe.com',
 			'Accept': 'multipart/form-data',
-			'Authorization': 'Bearer '+auth,
+			'Authorization': 'Bearer '+auth.strip(),
 			'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36',
 			'x-api-key': 'clio-playground-web'
 		}
@@ -91,10 +108,10 @@ class Firefly:
 
 		asset_tasks = []
 		if fetch_image_assets:
-			asset_tasks.append(Firefly.get_image_styles())
+			asset_tasks.append(Firefly._get_image_styles())
 		if fetch_text_assets:
-			asset_tasks.append(Firefly.get_text_presets())
-			asset_tasks.append(Firefly.get_text_fonts())
+			asset_tasks.append(Firefly._get_text_presets())
+			asset_tasks.append(Firefly._get_text_fonts())
 		
 		if asset_tasks:
 			assets = await asyncio.gather(*asset_tasks)
@@ -116,7 +133,7 @@ class Firefly:
 		return time.time() - self.session['expires_at'] <= 0
 
 	@staticmethod
-	async def get_image_styles() -> list[dict]:
+	async def _get_image_styles() -> list[dict]:
 		'''
 		Gets the image styles.
 		'''
@@ -131,7 +148,7 @@ class Firefly:
 				return data
 
 	@staticmethod
-	async def get_text_presets() -> list[dict]:
+	async def _get_text_presets() -> list[dict]:
 		'''
 		Gets the text presets.
 		'''
@@ -146,7 +163,7 @@ class Firefly:
 				return data
 
 	@staticmethod
-	async def get_text_fonts() -> list[dict]:
+	async def _get_text_fonts() -> list[dict]:
 		'''
 		Gets the text fonts.
 		'''
@@ -159,6 +176,26 @@ class Firefly:
 			async with s.get(url) as resp:
 				data = await resp.json()
 				return data
+
+	@staticmethod
+	def _check_gen_status(metadata: dict) -> None:
+		values = metadata['values']
+		if values.get('gi_GEN_STATUS'):
+			status = values['gi_GEN_STATUS']['value']
+		else:
+			status = values['gt_GEN_STATUS']['value']
+		if bool(1 & status):
+			raise ImageGenerationDenied('Denied')
+		elif bool(2 & status):
+			raise ImageGenerationDenied('BlockedClassNSFW')
+		elif bool(4 & status):
+			raise ImageGenerationDenied('BlockedClassArtist')
+		elif bool(8 & status):
+			raise ImageGenerationDenied('DeniedSilent')
+		elif bool(16 & status):
+			raise ImageGenerationDenied('NotEnglish')
+		elif bool(32 & status):
+			raise ImageGenerationDenied('PostProcessingNSFW')
 
 	async def create_session(self, duration:int = 3600) -> str:
 		'''
@@ -176,30 +213,32 @@ class Firefly:
 		async with aiohttp.ClientSession(headers=self.headers) as s:
 			async with s.post(url, data=formdata) as resp:
 				if resp.status == 401:
-					raise Exception('Unauthorized. Bearer auth token is invalid.')
+					raise Unauthorized('Bearer auth token is invalid.')
 				self.session['id'] = resp.headers.get('x-session-id', '')
 				if self.session['id']:
 					self.session['expires_at'] = time.time() + duration
 				return self.session['id']
 
-	async def text_to_image(self, prompt: str, **kwargs) -> dict:
+	async def text_to_image(self, prompt: str, **kwargs) -> Result:
 		'''
 		Generates an image from a text prompt.
 
 		:param prompt: The text prompt.
-		:param kwargs: Additional arguments. Can be generated using the utils.ImageOptions class
-			:seed: The seed for the image generation. Default is random.
-			:style_prompt: The style prompt for the image generation. Default is None.
-			:anchor_prompt: The anchor prompt for the image generation. Default is None.
-			:steps: The number of inference steps. Default is 40.
-			:width: The width of the image. Default is 1024.
-			:height: The height of the image. Default is 1024.
-			:fix_face: Whether to fix the face. Default is True.
+		:param seed: The seed for the image generation. Default is random.
+		:param style_prompt: The style prompt for the image generation. Default is None.
+		:param anchor_prompt: The anchor prompt for the image generation. Default is None.
+		:param steps: The number of inference steps. Default is 40.
+		:param width: The width of the image. Default is 1024.
+		:param height: The height of the image. Default is 1024.
+		:param fix_face: Whether to fix the face. Default is True.
 		
-		:return: The image data.
-			:metadata: The metadata of the response.
-			:filedata: The image bytes.
+		:return: pyfirefly.Result
+
+		:raises: pyfirefly.SessionExpired, pyfirefly.Unauthorized, pyfirefly.ImageGenerationDenied
 		'''
+		if not self.has_time_left:
+			raise SessionExpired('Create a new session using `await create_session()`. You can check for time left using `has_time_left`.')
+
 		url = f'{self.base}v2/predict'
 
 		seed = kwargs.get('seed', random.randint(0, 100000))
@@ -276,8 +315,144 @@ class Firefly:
 		formdata = aiohttp.FormData()
 		formdata.add_field('contentAnalyzerRequests', json.dumps(settings), content_type='form-data')
 
+		new_headers = dict(self.headers)
+		new_headers['x-session-id'] = self.session['id']
+		new_headers['x-transaction-id'] = str(uuid.uuid4())
+		new_headers['prefer'] = 'respond-sync, wait=100'
+
+		async with aiohttp.ClientSession(headers=new_headers) as s:
+			async with s.post(url, headers=new_headers, data=formdata) as resp:
+				if resp.status == 401:
+					raise Unauthorized('Unauthorized. Bearer auth token is invalid.')
+				reader = _Latin1MultipartReader(resp.headers, resp.content)
+				metadata = None
+				image = None
+				while True:
+					part = await reader.next()
+					if part.headers[aiohttp.hdrs.CONTENT_TYPE] == 'application/json':
+						metadata = await part.json()
+					elif part.headers[aiohttp.hdrs.CONTENT_TYPE] == 'image/jpeg':
+						image = await part.read(decode=False)
+					if metadata and image:
+						break
+
+				# Check if the image generation was successful
+				Firefly._check_gen_status(metadata)
+
+				gen_options = {
+					'seed': seed,
+					'style_prompt': kwargs.get('style_prompt'),
+					'anchor_prompt': kwargs.get('anchor_prompt'),
+					'steps': kwargs.get('steps', 40),
+					'width': kwargs.get('width', 1024),
+					'height': kwargs.get('height', 1024),
+					'fix_face': kwargs.get('fix_face', True)
+				}
+				return Result(image, metadata, 'jpeg', gen_options)
+
+	async def glyph_to_image(self, glyph: bytes, **kwargs) -> Result:
+		'''
+		Generates an image from a glyph (webp image data) and prompt.
+
+		:param glyph: The glyph to use. Must be a webp image (bytes). The non-transparent pixels will be filled in by Adobe Firefly.
+		:param description: Describe the text/fill effects you want to generate.
+		:param seed: The seed for the image generation. Default is random.
+		:param steps: The number of inference steps. Default is 30.
+		:param width: The width of the image. Default is 1024.
+		:param height: The height of the image. Default is 1024.
+		:param pad_ratio: The padding ratio. Default is 0.5.
+		:param strength: between 0.0 and 1.0, higher values cause more variations but potentially inconsistent outcomes. Default is 0.5. See https://github.com/CompVis/stable-diffusion/blob/main/README.md for more info.
+
+		:return: pyfirefly.Result
+		
+		:raises: pyfirefly.SessionExpired, pyfirefly.Unauthorized, pyfirefly.ImageGenerationDenied
+		'''
 		if not self.has_time_left:
-			raise Exception('Session expired. Create one using `await self.create_session()`')
+			raise SessionExpired('Create a new session using `await create_session()`. You can check for time left using `has_time_left`.')
+
+		if not kwargs.get('description'):
+			raise ValueError('You must provide a description.')
+
+		url = f'{self.base}v2/predict'
+
+		seed = kwargs.get('seed', random.randint(0, 100000))
+		advanced_options = { 'num_inference_steps': kwargs.get('steps', 30) }
+
+		settings = {
+			"sensei:name": "SelectionParse v2",
+			"sensei:invocation_mode": "synchronous",
+			"sensei:invocation_batch": False,
+			"sensei:in_response": False,
+			"sensei:engines": [
+				{
+					"sensei:execution_info": {
+						"sensei:engine": self.engine
+					},
+					"sensei:inputs": {
+						"gi_GLYPHMASK": {
+							"dc:format": "image/webp",
+							"sensei:multipart_field_name": "gi_GLYPHMASK",
+						}
+					},
+					"sensei:outputs": {
+						"spl:response": {
+							"dc:format": "application/json",
+							"sensei:multipart_field_name": "spl:response",
+						},
+						"gi_GEN_IMAGE": {
+							"dc:format": "image/webp",
+							"sensei:multipart_field_name": "outfile",
+						},
+					},
+					"sensei:params": {
+						"spl:request": {
+							"graph": {"uri": "urn:graph:Glyph2Image_v2"},
+							"params": [
+								{"name": "gi_SEED", "type": "scalar", "value": seed},
+								{"name": "gi_NUM_STEPS", "type": "scalar", "value": kwargs.get('steps', 30) },
+								{"name": "gi_OUTPUT_WIDTH", "type": "scalar", "value": kwargs.get('width', 1024) },
+								{"name": "gi_OUTPUT_HEIGHT", "type": "scalar", "value": kwargs.get('height', 1024) },
+								{
+									"name": "gi_ADVANCED",
+									"type": "string",
+									"value": json.dumps(advanced_options),
+								},
+								{"name": "gi_LANGUAGE", "type": "string", "value": "en-us"},
+								{"name": "gi_PAD_RATIO", "type": "scalar", "value": kwargs.get('pad_ratio', -1)},
+								{"name": "gi_STRENGTH", "type": "scalar", "value": kwargs.get('strength', 0.5) },
+							],
+							"inputs": {
+								"gi_PROMPT": {
+									"id": str(uuid.uuid4()),
+									"type": "string",
+									"value": kwargs.get('description'),
+								},
+								"gi_GLYPHMASK": {
+									"id": str(uuid.uuid4()),
+									"type": "image",
+									"mimeType": "image/webp",
+								},
+							},
+							"outputs": {
+								"gi_GEN_IMAGE": {
+									"id": str(uuid.uuid4()),
+									"type": "image",
+									"expectedMimeType": "image/webp",
+								},
+								"gi_GEN_STATUS": {
+									"id": str(uuid.uuid4()),
+									"type": "scalar",
+								},
+							},
+						}
+					},
+				}
+			],
+		}
+
+		formdata = aiohttp.FormData()
+		formdata.add_field('contentAnalyzerRequests', json.dumps(settings), content_type='form-data')
+		formdata.add_field('gi_GLYPHMASK', glyph, filename='blob', content_type='image/webp')
 
 		new_headers = dict(self.headers)
 		new_headers['x-session-id'] = self.session['id']
@@ -287,19 +462,29 @@ class Firefly:
 		async with aiohttp.ClientSession(headers=new_headers) as s:
 			async with s.post(url, headers=new_headers, data=formdata) as resp:
 				if resp.status == 401:
-					raise Exception('Unauthorized. Bearer auth token is invalid.')
-				reader = aiohttp.MultipartReader.from_response(resp)
+					raise Unauthorized('Unauthorized. Bearer auth token is invalid.')
+				reader = _Latin1MultipartReader(resp.headers, resp.content)
 				metadata = None
-				filedata = None
+				image = None
 				while True:
 					part = await reader.next()
 					if part.headers[aiohttp.hdrs.CONTENT_TYPE] == 'application/json':
 						metadata = await part.json()
-					elif part.headers[aiohttp.hdrs.CONTENT_TYPE] == 'image/jpeg':
-						filedata = await part.read(decode=False)
-					if metadata and filedata:
+					elif part.headers[aiohttp.hdrs.CONTENT_TYPE] == 'image/webp':
+						image = await part.read(decode=False)
+					if metadata and image:
 						break
-				return {
-					'metadata': metadata,
-					'filedata': filedata
+
+				# Check if the image generation was successful
+				Firefly._check_gen_status(metadata)
+
+				gen_options = {
+					'description': kwargs.get('description'),
+					'seed': seed,
+					'steps': kwargs.get('steps', 30),
+					'width': kwargs.get('width', 1024),
+					'height': kwargs.get('height', 1024),
+					'pad_ratio': kwargs.get('pad_ratio', -1),
+					'strength': kwargs.get('strength', 0.5)
 				}
+				return Result(image, metadata, 'webp', gen_options)
