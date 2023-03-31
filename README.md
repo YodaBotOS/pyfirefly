@@ -71,3 +71,6 @@ async def demo(input_fn, num):
 
 asyncio.run(demo('glyph.webp', 10))
 ```
+
+## Docs
+[https://discordtehe.github.io/pyfirefly](https://discordtehe.github.io/pyfirefly)
