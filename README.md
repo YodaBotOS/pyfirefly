@@ -1,6 +1,11 @@
 # pyfirefly
 python library for reverse engineered Adobe Firefly API
 
+## Installing
+```
+pip install pyfirefly
+```
+
 ## Example Usage
 #### Text to Image
 The following example will request for 10 images of "flying cats" from Adobe Firefly and save those images.
