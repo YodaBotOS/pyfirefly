@@ -23,11 +23,16 @@ class ImageOptions:
 	'''
 	Image options creator function.
 	
-	:param image_styles: List of image styles.
-	:param text_presets: List of text presets.
+	Parameters
+	----------
+	image_styles: list, optional
+		List of image styles.
+	text_presets: list, optional
+		List of text presets.
 
-	..notes::
-		access options with img.options
+	Notes
+	-----
+	access resulting options with img.options
 	'''
 	__slots__ = ['image_styles', 'text_presets', 'options', 'ids', 'titles', 'groups']
 	def __init__(self, **kwargs):
@@ -75,7 +80,10 @@ class ImageOptions:
 		'''
 		Sets the aspect ratio of the image.
 
-		:param aspect_ratio: The aspect ratio to set. Can be one of ['square', 'landscape', 'portrait', 'widescreen']
+		Parameters
+		----------
+		aspect_ratio: str
+			The aspect ratio to set. Can be one of ['square', 'landscape', 'portrait', 'widescreen']
 		'''
 		aspect_ratio = aspect_ratio.lower()
 		if aspect_ratio not in ASPECT_RATIOS:
@@ -202,8 +210,12 @@ class ImageOptions:
 		'''
 		Sets the text preset of the image. Used for text-effects.
 
-		:param preset: The text preset
-		:param auto_set_seed: Whether to automatically set the seed to a random seed suggestion. Default is True.
+		Parameters
+		----------
+		preset: str
+			The text preset
+		auto_set_seed: bool, optional
+			Whether to automatically set the seed to a random seed suggestion. Default is True.
 		'''
 		if not self._is_valid_preset(preset):
 			raise Exception('Invalid text preset.')

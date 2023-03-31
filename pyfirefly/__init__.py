@@ -31,10 +31,16 @@ class Result:
 	'''
 	Represents a result from the Adobe Firefly API.
 
-	:param image: The image data.
-	:param ext: The image extention.
-	:param metadata: The metadata.
-	:param img_options: The image options that were used to generate the image.
+	Parameters
+	----------
+	image: bytes
+		The image data.
+	ext: str
+		The image extension.
+	metadata: dict
+		The metadata.
+	img_options: dict
+		The image options that were used to generate the image.
 	'''
 	__slots__ = ['image', 'ext', 'metadata', 'img_options']
 	def __init__(self, image: bytes, metadata: dict, ext: str, img_options: dict):
@@ -47,11 +53,18 @@ class Firefly:
 	'''
 	Reverse engineered Adobe Firefly API.
 
-	:param auth: The authorization bearer token to use.
-	:param build: The build to use. Can be one of 'dev', 'stage', or 'prod'.
-	:param anonymous: Whether to use anonymous mode. Not supported yet.
-	:param fetch_image_assets: Whether to fetch image assets.
-	:param fetch_text_assets: Whether to fetch text assets.
+	Parameters
+	----------
+	auth: str
+		The authorization bearer token to use.
+	build: str, optional
+		The build to use. Can be one of 'dev', 'stage', or 'prod'. Defaults to 'prod'.
+	anonymous: bool, optional
+		Whether to use anonymous mode. Not supported yet.
+	fetch_image_assets: bool, optional
+		Whether to fetch image assets. Defaults to True.
+	fetch_text_assets: bool, optional
+		Whether to fetch text assets. Defaults to True.
     '''
 	__slots__ = ['headers', 'base', 'engine', 'session', 'image_styles', 'text_presets', 'text_fonts']
 
@@ -201,9 +214,13 @@ class Firefly:
 		'''
 		Creates a session.
 
-		:param duration: The duration of the session in seconds.
+		Parameters
+		----------
+		duration: The duration of the session in seconds.
 
-		:return: The session ID string.
+		Returns
+		-------
+		The session ID string.
 		'''
 		url = f'{self.base}session/create'
 
@@ -223,18 +240,32 @@ class Firefly:
 		'''
 		Generates an image from a text prompt.
 
-		:param prompt: The text prompt.
-		:param seed: The seed for the image generation. Default is random.
-		:param style_prompt: The style prompt for the image generation. Default is None.
-		:param anchor_prompt: The anchor prompt for the image generation. Default is None.
-		:param steps: The number of inference steps. Default is 40.
-		:param width: The width of the image. Default is 1024.
-		:param height: The height of the image. Default is 1024.
-		:param fix_face: Whether to fix the face. Default is True.
+		Parameters
+		----------
+		prompt: str
+			The text prompt.
+		seed: int, optional
+			The seed for the image generation. Default is random.
+		style_prompt: str, optional
+			The style prompt for the image generation. Default is None.
+		anchor_prompt: str, optional
+			The anchor prompt for the image generation. Default is None.
+		steps: int, optional
+			The number of inference steps. Default is 40.
+		width: int,	optional
+			The width of the image. Default is 1024.
+		height: int, optional
+			The height of the image. Default is 1024.
+		fix_face: bool, optional
+			Whether to fix the face. Default is True.
 		
-		:return: pyfirefly.Result
+		Returns
+		-------
+		pyfirefly.Result
 
-		:raises: pyfirefly.SessionExpired, pyfirefly.Unauthorized, pyfirefly.ImageGenerationDenied
+		Raises
+		------
+		pyfirefly.SessionExpired, pyfirefly.Unauthorized, pyfirefly.ImageGenerationDenied
 		'''
 		if not self.has_time_left:
 			raise SessionExpired('Create a new session using `await create_session()`. You can check for time left using `has_time_left`.')
@@ -354,18 +385,32 @@ class Firefly:
 		'''
 		Generates an image from a glyph (webp image data) and prompt.
 
-		:param glyph: The glyph to use. Must be a webp image (bytes). The non-transparent pixels will be filled in by Adobe Firefly.
-		:param description: Describe the text/fill effects you want to generate.
-		:param seed: The seed for the image generation. Default is random.
-		:param steps: The number of inference steps. Default is 30.
-		:param width: The width of the image. Default is 1024.
-		:param height: The height of the image. Default is 1024.
-		:param pad_ratio: The padding ratio. Default is 0.5.
-		:param strength: between 0.0 and 1.0, higher values cause more variations but potentially inconsistent outcomes. Default is 0.5. See https://github.com/CompVis/stable-diffusion/blob/main/README.md for more info.
+		Parameters
+		----------
+		glyph: bytes
+			The glyph to use. Must be a webp image (bytes). The non-transparent pixels will be filled in by Adobe Firefly.
+		description: str
+			Describe the text/fill effects you want to generate.
+		seed: int, optional
+			The seed for the image generation. Default is random.
+		steps: int, optional
+			The number of inference steps. Default is 30.
+		width: int, optional
+			The width of the image. Default is 1024.
+		height: int, optional
+			The height of the image. Default is 1024.
+		pad_ratio: float, optional
+			The padding ratio. Default is 0.5.
+		strength: float, optional
+			between 0.0 and 1.0, higher values cause more variations but potentially inconsistent outcomes. Default is 0.5. See https://github.com/CompVis/stable-diffusion/blob/main/README.md for more info.
 
-		:return: pyfirefly.Result
+		Returns
+		-------
+		pyfirefly.Result
 		
-		:raises: pyfirefly.SessionExpired, pyfirefly.Unauthorized, pyfirefly.ImageGenerationDenied
+		Raises
+		------
+		pyfirefly.SessionExpired, pyfirefly.Unauthorized, pyfirefly.ImageGenerationDenied
 		'''
 		if not self.has_time_left:
 			raise SessionExpired('Create a new session using `await create_session()`. You can check for time left using `has_time_left`.')
